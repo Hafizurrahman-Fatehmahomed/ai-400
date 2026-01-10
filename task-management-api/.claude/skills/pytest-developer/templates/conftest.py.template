@@ -1,0 +1,217 @@
+"""
+Pytest Configuration and Shared Fixtures
+
+This conftest.py provides:
+- Custom pytest configuration and markers
+- Database session management
+- Test client setup
+- Factory fixtures for creating test data
+- Environment setup
+
+Usage:
+    Copy this file to tests/conftest.py and customize for your project.
+"""
+import os
+import pytest
+from typing import Generator
+
+# ============================================================================
+# PYTEST CONFIGURATION
+# ============================================================================
+
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line("markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')")
+    config.addinivalue_line("markers", "integration: integration tests requiring external services")
+    config.addinivalue_line("markers", "e2e: end-to-end tests")
+
+
+def pytest_addoption(parser):
+    """Add custom command line options."""
+    parser.addoption(
+        "--runslow",
+        action="store_true",
+        default=False,
+        help="run slow tests",
+    )
+    parser.addoption(
+        "--env",
+        action="store",
+        default="test",
+        choices=["test", "staging"],
+        help="environment to run tests against",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Modify test collection based on markers and options."""
+    if not config.getoption("--runslow"):
+        skip_slow = pytest.mark.skip(reason="need --runslow option to run")
+        for item in items:
+            if "slow" in item.keywords:
+                item.add_marker(skip_slow)
+
+
+# ============================================================================
+# ENVIRONMENT FIXTURES
+# ============================================================================
+
+@pytest.fixture(autouse=True)
+def test_environment(monkeypatch):
+    """Set test environment variables for all tests."""
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+    # Add your test environment variables here
+
+
+@pytest.fixture
+def env(request):
+    """Get the test environment from command line."""
+    return request.config.getoption("--env")
+
+
+# ============================================================================
+# DATABASE FIXTURES
+# ============================================================================
+
+# Uncomment and customize for your database setup
+
+# from sqlalchemy import create_engine
+# from sqlalchemy.orm import sessionmaker
+# from sqlalchemy.pool import StaticPool
+# from app.database import Base, get_db
+# from app.main import app
+
+# SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
+
+# @pytest.fixture(scope="session")
+# def engine():
+#     """Create test database engine (session-scoped)."""
+#     engine = create_engine(
+#         SQLALCHEMY_DATABASE_URL,
+#         connect_args={"check_same_thread": False},
+#         poolclass=StaticPool,
+#     )
+#     Base.metadata.create_all(bind=engine)
+#     yield engine
+#     engine.dispose()
+
+
+# @pytest.fixture
+# def db_session(engine) -> Generator:
+#     """Create database session with automatic rollback."""
+#     connection = engine.connect()
+#     transaction = connection.begin()
+#     Session = sessionmaker(bind=connection)
+#     session = Session()
+#
+#     yield session
+#
+#     session.close()
+#     transaction.rollback()
+#     connection.close()
+
+
+# ============================================================================
+# API CLIENT FIXTURES
+# ============================================================================
+
+# Uncomment for FastAPI testing
+
+# from fastapi.testclient import TestClient
+
+# @pytest.fixture
+# def client(db_session) -> Generator:
+#     """Create test client with database override."""
+#     def override_get_db():
+#         try:
+#             yield db_session
+#         finally:
+#             pass
+#
+#     app.dependency_overrides[get_db] = override_get_db
+#     with TestClient(app) as test_client:
+#         yield test_client
+#     app.dependency_overrides.clear()
+
+
+# ============================================================================
+# FACTORY FIXTURES
+# ============================================================================
+
+# @pytest.fixture
+# def make_user(db_session):
+#     """Factory fixture for creating test users."""
+#     created_users = []
+#
+#     def _make_user(
+#         name: str = "Test User",
+#         email: str | None = None,
+#         **kwargs
+#     ):
+#         from app.models import User
+#
+#         if email is None:
+#             import uuid
+#             email = f"test-{uuid.uuid4().hex[:8]}@example.com"
+#
+#         user = User(name=name, email=email, **kwargs)
+#         db_session.add(user)
+#         db_session.commit()
+#         db_session.refresh(user)
+#         created_users.append(user)
+#         return user
+#
+#     yield _make_user
+#
+#     # Cleanup
+#     for user in created_users:
+#         db_session.delete(user)
+#     db_session.commit()
+
+
+# ============================================================================
+# MOCK FIXTURES
+# ============================================================================
+
+@pytest.fixture
+def mock_external_api(monkeypatch):
+    """Mock external API calls."""
+    responses = {}
+
+    def mock_request(url, **kwargs):
+        if url in responses:
+            return responses[url]
+        raise ValueError(f"Unmocked URL: {url}")
+
+    # Customize the module path for your project
+    # monkeypatch.setattr("app.client.fetch", mock_request)
+
+    return responses
+
+
+# ============================================================================
+# UTILITY FIXTURES
+# ============================================================================
+
+@pytest.fixture
+def temp_file(tmp_path):
+    """Create a temporary file for testing."""
+    file_path = tmp_path / "test_file.txt"
+    file_path.write_text("test content")
+    return file_path
+
+
+@pytest.fixture
+def sample_data():
+    """Provide sample test data."""
+    return {
+        "users": [
+            {"name": "Alice", "email": "alice@example.com"},
+            {"name": "Bob", "email": "bob@example.com"},
+        ],
+        "tasks": [
+            {"title": "Task 1", "completed": False},
+            {"title": "Task 2", "completed": True},
+        ],
+    }

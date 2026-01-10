@@ -1,0 +1,309 @@
+"""
+Service/Business Logic Test Template
+
+This template provides patterns for testing service classes including:
+- Dependency injection and mocking
+- Business logic validation
+- Error handling
+- Integration with repositories
+
+Usage:
+    Copy this file to tests/unit/test_<service_name>_service.py
+    Replace 'Resource' with your actual entity name
+"""
+import pytest
+from unittest.mock import Mock, patch, MagicMock
+from datetime import datetime, timedelta
+
+
+class TestResourceService:
+    """Test suite for ResourceService business logic."""
+
+    # ========================================================================
+    # FIXTURES
+    # ========================================================================
+
+    @pytest.fixture
+    def mock_repository(self):
+        """Create a mock repository."""
+        return Mock()
+
+    @pytest.fixture
+    def mock_cache(self):
+        """Create a mock cache service."""
+        cache = Mock()
+        cache.get.return_value = None  # Default: cache miss
+        return cache
+
+    @pytest.fixture
+    def mock_event_bus(self):
+        """Create a mock event bus."""
+        return Mock()
+
+    @pytest.fixture
+    def service(self, mock_repository, mock_cache, mock_event_bus):
+        """Create service with mocked dependencies."""
+        from app.services import ResourceService
+
+        return ResourceService(
+            repository=mock_repository,
+            cache=mock_cache,
+            event_bus=mock_event_bus,
+        )
+
+    # ========================================================================
+    # CREATE OPERATIONS
+    # ========================================================================
+
+    def test_create_resource_success(self, service, mock_repository, mock_event_bus):
+        """Test successful resource creation."""
+        # Arrange
+        mock_repository.create.return_value = Mock(
+            id=1,
+            name="Test Resource",
+            created_at=datetime.now(),
+        )
+
+        # Act
+        result = service.create(name="Test Resource", description="Test")
+
+        # Assert
+        assert result.id == 1
+        assert result.name == "Test Resource"
+        mock_repository.create.assert_called_once()
+        mock_event_bus.publish.assert_called_once()  # Event published
+
+    def test_create_resource_validates_name(self, service):
+        """Test that empty name is rejected."""
+        with pytest.raises(ValueError, match="Name cannot be empty"):
+            service.create(name="", description="Test")
+
+    def test_create_resource_duplicate_name(self, service, mock_repository):
+        """Test handling of duplicate name."""
+        mock_repository.get_by_name.return_value = Mock(id=1)  # Already exists
+
+        with pytest.raises(ValueError, match="already exists"):
+            service.create(name="Existing", description="Test")
+
+    # ========================================================================
+    # READ OPERATIONS
+    # ========================================================================
+
+    def test_get_by_id_found(self, service, mock_repository):
+        """Test getting resource by ID when it exists."""
+        expected = Mock(id=1, name="Found")
+        mock_repository.get_by_id.return_value = expected
+
+        result = service.get_by_id(1)
+
+        assert result == expected
+        mock_repository.get_by_id.assert_called_once_with(1)
+
+    def test_get_by_id_not_found(self, service, mock_repository):
+        """Test getting resource by ID when it doesn't exist."""
+        mock_repository.get_by_id.return_value = None
+
+        result = service.get_by_id(999)
+
+        assert result is None
+
+    def test_get_by_id_uses_cache(self, service, mock_repository, mock_cache):
+        """Test that cache is checked first."""
+        cached_value = Mock(id=1, name="Cached")
+        mock_cache.get.return_value = cached_value
+
+        result = service.get_by_id(1)
+
+        assert result == cached_value
+        mock_cache.get.assert_called_once()
+        mock_repository.get_by_id.assert_not_called()  # Cache hit
+
+    def test_get_by_id_populates_cache(self, service, mock_repository, mock_cache):
+        """Test that cache is populated on cache miss."""
+        mock_cache.get.return_value = None
+        db_value = Mock(id=1, name="From DB")
+        mock_repository.get_by_id.return_value = db_value
+
+        result = service.get_by_id(1)
+
+        assert result == db_value
+        mock_cache.set.assert_called_once()
+
+    def test_list_with_filters(self, service, mock_repository):
+        """Test listing resources with filters."""
+        mock_repository.list.return_value = [Mock(), Mock()]
+
+        result = service.list(status="active", limit=10)
+
+        mock_repository.list.assert_called_once_with(
+            status="active",
+            limit=10,
+        )
+        assert len(result) == 2
+
+    # ========================================================================
+    # UPDATE OPERATIONS
+    # ========================================================================
+
+    def test_update_success(self, service, mock_repository, mock_cache):
+        """Test successful resource update."""
+        existing = Mock(id=1, name="Old Name")
+        mock_repository.get_by_id.return_value = existing
+        mock_repository.update.return_value = Mock(id=1, name="New Name")
+
+        result = service.update(1, name="New Name")
+
+        assert result.name == "New Name"
+        mock_cache.delete.assert_called()  # Cache invalidated
+
+    def test_update_not_found(self, service, mock_repository):
+        """Test update when resource doesn't exist."""
+        mock_repository.get_by_id.return_value = None
+
+        with pytest.raises(ValueError, match="not found"):
+            service.update(999, name="New Name")
+
+    def test_update_partial(self, service, mock_repository):
+        """Test partial update preserves unchanged fields."""
+        existing = Mock(id=1, name="Keep", description="Change")
+        mock_repository.get_by_id.return_value = existing
+
+        service.update(1, description="New Description")
+
+        call_args = mock_repository.update.call_args
+        assert "name" not in call_args.kwargs  # Not updated
+
+    # ========================================================================
+    # DELETE OPERATIONS
+    # ========================================================================
+
+    def test_delete_success(self, service, mock_repository, mock_cache, mock_event_bus):
+        """Test successful resource deletion."""
+        existing = Mock(id=1)
+        mock_repository.get_by_id.return_value = existing
+
+        service.delete(1)
+
+        mock_repository.delete.assert_called_once_with(1)
+        mock_cache.delete.assert_called()
+        mock_event_bus.publish.assert_called()
+
+    def test_delete_not_found(self, service, mock_repository):
+        """Test delete when resource doesn't exist."""
+        mock_repository.get_by_id.return_value = None
+
+        with pytest.raises(ValueError, match="not found"):
+            service.delete(999)
+
+    def test_delete_with_dependencies_fails(self, service, mock_repository):
+        """Test delete fails when resource has dependencies."""
+        existing = Mock(id=1, children=[Mock()])  # Has children
+        mock_repository.get_by_id.return_value = existing
+
+        with pytest.raises(ValueError, match="has dependencies"):
+            service.delete(1)
+
+    # ========================================================================
+    # BUSINESS LOGIC
+    # ========================================================================
+
+    def test_process_resource_workflow(self, service, mock_repository):
+        """Test a multi-step business workflow."""
+        resource = Mock(id=1, status="pending")
+        mock_repository.get_by_id.return_value = resource
+
+        result = service.process(1)
+
+        # Verify workflow steps
+        assert mock_repository.update.call_count >= 1
+        assert result.status == "processed"
+
+    def test_calculate_statistics(self, service, mock_repository):
+        """Test aggregate calculation."""
+        mock_repository.list.return_value = [
+            Mock(value=10),
+            Mock(value=20),
+            Mock(value=30),
+        ]
+
+        stats = service.calculate_statistics()
+
+        assert stats["total"] == 60
+        assert stats["average"] == 20
+        assert stats["count"] == 3
+
+    @pytest.mark.parametrize("status,expected_next", [
+        ("draft", "pending"),
+        ("pending", "approved"),
+        ("approved", "completed"),
+    ])
+    def test_state_transitions(self, service, mock_repository, status, expected_next):
+        """Test valid state transitions."""
+        resource = Mock(id=1, status=status)
+        mock_repository.get_by_id.return_value = resource
+
+        service.advance_status(1)
+
+        update_call = mock_repository.update.call_args
+        assert update_call.kwargs["status"] == expected_next
+
+    def test_invalid_state_transition(self, service, mock_repository):
+        """Test invalid state transition is rejected."""
+        resource = Mock(id=1, status="completed")
+        mock_repository.get_by_id.return_value = resource
+
+        with pytest.raises(ValueError, match="Invalid state transition"):
+            service.advance_status(1)
+
+    # ========================================================================
+    # ERROR HANDLING
+    # ========================================================================
+
+    def test_handles_repository_error(self, service, mock_repository):
+        """Test graceful handling of repository errors."""
+        mock_repository.get_by_id.side_effect = Exception("Database error")
+
+        with pytest.raises(Exception, match="Database error"):
+            service.get_by_id(1)
+
+    def test_retries_on_transient_error(self, service, mock_repository):
+        """Test retry logic for transient errors."""
+        mock_repository.create.side_effect = [
+            ConnectionError("Temporary failure"),
+            ConnectionError("Temporary failure"),
+            Mock(id=1),  # Success on third try
+        ]
+
+        result = service.create_with_retry(name="Test", max_retries=3)
+
+        assert result.id == 1
+        assert mock_repository.create.call_count == 3
+
+
+class TestResourceServiceIntegration:
+    """Integration tests with real dependencies (but test database)."""
+
+    @pytest.mark.integration
+    def test_full_crud_workflow(self, db_session):
+        """Test complete CRUD workflow with real database."""
+        from app.services import ResourceService
+        from app.repositories import ResourceRepository
+
+        repo = ResourceRepository(db_session)
+        service = ResourceService(repository=repo)
+
+        # Create
+        created = service.create(name="Integration Test")
+        assert created.id is not None
+
+        # Read
+        fetched = service.get_by_id(created.id)
+        assert fetched.name == "Integration Test"
+
+        # Update
+        updated = service.update(created.id, name="Updated Name")
+        assert updated.name == "Updated Name"
+
+        # Delete
+        service.delete(created.id)
+        assert service.get_by_id(created.id) is None

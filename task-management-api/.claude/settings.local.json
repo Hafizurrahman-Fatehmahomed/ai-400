@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash .claude/skills/fetching-library-docs/scripts/fetch-docs.sh:*)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__query-docs",
+      "Skill(skill-maker)",
+      "Skill(fastapi-developer)",
+      "Skill(pytest-developer)",
+      "Bash(uv sync:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run python:*)",
+      "Bash(uv pip install:*)"
+    ]
+  }
+}

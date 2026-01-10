@@ -1,0 +1,313 @@
+"""
+FastAPI API Test Template
+
+This template provides patterns for testing FastAPI endpoints including:
+- CRUD operations
+- Authentication
+- Error handling
+- Request validation
+
+Usage:
+    Copy this file to tests/integration/test_<resource>.py
+    Replace 'resource' with your actual resource name (e.g., users, tasks)
+"""
+import pytest
+from fastapi import status
+
+
+class TestResourceEndpoints:
+    """Test suite for /resources/ endpoints."""
+
+    # ========================================================================
+    # CREATE (POST)
+    # ========================================================================
+
+    def test_create_resource_success(self, client):
+        """Test successful resource creation."""
+        payload = {
+            "name": "Test Resource",
+            "description": "A test resource",
+        }
+
+        response = client.post("/resources/", json=payload)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        data = response.json()
+        assert data["name"] == payload["name"]
+        assert data["description"] == payload["description"]
+        assert "id" in data
+        assert "created_at" in data
+
+    def test_create_resource_missing_required_field(self, client):
+        """Test creation fails with missing required field."""
+        payload = {
+            "description": "Missing name field",
+        }
+
+        response = client.post("/resources/", json=payload)
+
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        errors = response.json()["detail"]
+        assert any(e["loc"][-1] == "name" for e in errors)
+
+    def test_create_resource_invalid_data(self, client):
+        """Test creation fails with invalid data."""
+        payload = {
+            "name": "",  # Empty string not allowed
+            "description": "x" * 10001,  # Exceeds max length
+        }
+
+        response = client.post("/resources/", json=payload)
+
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    # ========================================================================
+    # READ (GET)
+    # ========================================================================
+
+    def test_list_resources_empty(self, client):
+        """Test listing resources when none exist."""
+        response = client.get("/resources/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json() == []
+
+    def test_list_resources_with_data(self, client, make_resource):
+        """Test listing resources returns all resources."""
+        # Create test data
+        resource1 = make_resource(name="Resource 1")
+        resource2 = make_resource(name="Resource 2")
+
+        response = client.get("/resources/")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert len(data) == 2
+        names = [r["name"] for r in data]
+        assert "Resource 1" in names
+        assert "Resource 2" in names
+
+    def test_list_resources_pagination(self, client, make_resource):
+        """Test pagination parameters."""
+        # Create 15 resources
+        for i in range(15):
+            make_resource(name=f"Resource {i}")
+
+        # First page
+        response = client.get("/resources/", params={"skip": 0, "limit": 10})
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.json()) == 10
+
+        # Second page
+        response = client.get("/resources/", params={"skip": 10, "limit": 10})
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.json()) == 5
+
+    def test_get_resource_by_id(self, client, make_resource):
+        """Test getting a single resource by ID."""
+        resource = make_resource(name="Test Resource")
+
+        response = client.get(f"/resources/{resource.id}")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["id"] == resource.id
+        assert data["name"] == "Test Resource"
+
+    def test_get_resource_not_found(self, client):
+        """Test getting non-existent resource returns 404."""
+        response = client.get("/resources/99999")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert "not found" in response.json()["detail"].lower()
+
+    # ========================================================================
+    # UPDATE (PUT/PATCH)
+    # ========================================================================
+
+    def test_update_resource_full(self, client, make_resource):
+        """Test full resource update (PUT)."""
+        resource = make_resource(name="Original", description="Original desc")
+
+        payload = {
+            "name": "Updated",
+            "description": "Updated desc",
+        }
+        response = client.put(f"/resources/{resource.id}", json=payload)
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["name"] == "Updated"
+        assert data["description"] == "Updated desc"
+
+    def test_update_resource_partial(self, client, make_resource):
+        """Test partial resource update (PATCH)."""
+        resource = make_resource(name="Original", description="Keep this")
+
+        payload = {"name": "Updated"}
+        response = client.patch(f"/resources/{resource.id}", json=payload)
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["name"] == "Updated"
+        assert data["description"] == "Keep this"  # Unchanged
+
+    def test_update_resource_not_found(self, client):
+        """Test updating non-existent resource returns 404."""
+        payload = {"name": "Updated"}
+        response = client.put("/resources/99999", json=payload)
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    # ========================================================================
+    # DELETE
+    # ========================================================================
+
+    def test_delete_resource(self, client, make_resource):
+        """Test successful resource deletion."""
+        resource = make_resource(name="To Delete")
+
+        response = client.delete(f"/resources/{resource.id}")
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+
+        # Verify deleted
+        get_response = client.get(f"/resources/{resource.id}")
+        assert get_response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_delete_resource_not_found(self, client):
+        """Test deleting non-existent resource returns 404."""
+        response = client.delete("/resources/99999")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_delete_resource_idempotent(self, client, make_resource):
+        """Test delete is idempotent (second delete returns 404)."""
+        resource = make_resource(name="To Delete")
+        resource_id = resource.id
+
+        # First delete
+        response1 = client.delete(f"/resources/{resource_id}")
+        assert response1.status_code == status.HTTP_204_NO_CONTENT
+
+        # Second delete
+        response2 = client.delete(f"/resources/{resource_id}")
+        assert response2.status_code == status.HTTP_404_NOT_FOUND
+
+
+class TestResourceAuthentication:
+    """Test authentication requirements for resource endpoints."""
+
+    def test_protected_endpoint_without_auth(self, client):
+        """Test protected endpoint returns 401 without auth."""
+        response = client.get("/resources/protected")
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_protected_endpoint_with_invalid_token(self, client):
+        """Test protected endpoint returns 401 with invalid token."""
+        headers = {"Authorization": "Bearer invalid-token"}
+        response = client.get("/resources/protected", headers=headers)
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_protected_endpoint_with_valid_auth(self, client, auth_headers):
+        """Test protected endpoint works with valid auth."""
+        response = client.get("/resources/protected", headers=auth_headers)
+
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_admin_only_endpoint_as_regular_user(self, client, user_auth_headers):
+        """Test admin endpoint returns 403 for regular users."""
+        response = client.get("/resources/admin-only", headers=user_auth_headers)
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_admin_only_endpoint_as_admin(self, client, admin_auth_headers):
+        """Test admin endpoint works for admin users."""
+        response = client.get("/resources/admin-only", headers=admin_auth_headers)
+
+        assert response.status_code == status.HTTP_200_OK
+
+
+class TestResourceFiltering:
+    """Test filtering and search functionality."""
+
+    def test_filter_by_status(self, client, make_resource):
+        """Test filtering resources by status."""
+        make_resource(name="Active 1", status="active")
+        make_resource(name="Active 2", status="active")
+        make_resource(name="Inactive", status="inactive")
+
+        response = client.get("/resources/", params={"status": "active"})
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert len(data) == 2
+        assert all(r["status"] == "active" for r in data)
+
+    def test_search_by_name(self, client, make_resource):
+        """Test searching resources by name."""
+        make_resource(name="Alpha Resource")
+        make_resource(name="Beta Resource")
+        make_resource(name="Gamma Item")
+
+        response = client.get("/resources/", params={"search": "Resource"})
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert len(data) == 2
+
+    def test_sort_by_field(self, client, make_resource):
+        """Test sorting resources."""
+        make_resource(name="Zebra")
+        make_resource(name="Alpha")
+        make_resource(name="Middle")
+
+        response = client.get(
+            "/resources/",
+            params={"sort_by": "name", "sort_order": "asc"}
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        names = [r["name"] for r in data]
+        assert names == sorted(names)
+
+
+class TestResourceValidation:
+    """Test input validation edge cases."""
+
+    @pytest.mark.parametrize("invalid_id", [
+        "abc",      # Non-numeric
+        "-1",       # Negative
+        "0",        # Zero (if not valid)
+        "1.5",      # Float
+    ])
+    def test_invalid_id_format(self, client, invalid_id):
+        """Test various invalid ID formats."""
+        response = client.get(f"/resources/{invalid_id}")
+
+        assert response.status_code in [
+            status.HTTP_404_NOT_FOUND,
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+        ]
+
+    @pytest.mark.parametrize("name,should_pass", [
+        ("Valid Name", True),
+        ("A", True),                    # Minimum length
+        ("x" * 100, True),              # Maximum length
+        ("", False),                    # Empty
+        ("x" * 101, False),             # Exceeds max
+        (None, False),                  # Null
+    ])
+    def test_name_validation(self, client, name, should_pass):
+        """Test name field validation rules."""
+        payload = {"name": name, "description": "Test"}
+
+        response = client.post("/resources/", json=payload)
+
+        if should_pass:
+            assert response.status_code == status.HTTP_201_CREATED
+        else:
+            assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
