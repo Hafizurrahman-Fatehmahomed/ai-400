@@ -1,0 +1,116 @@
+# SQLModel FastAPI Router Template
+# Replace {{ModelName}} with your model name (e.g., User, Product, Order)
+# Replace {{model_name}} with lowercase version (e.g., user, product, order)
+# Replace {{route_prefix}} with route prefix (e.g., /users, /products, /orders)
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlmodel import Session
+
+from app.database import get_session
+from app.models.{{model_name}} import (
+    {{ModelName}},
+    {{ModelName}}Create,
+    {{ModelName}}Update,
+    {{ModelName}}Public,
+)
+from app.crud import {{model_name}} as crud
+
+
+router = APIRouter(prefix="{{route_prefix}}", tags=["{{model_name}}s"])
+
+
+# =============================================================================
+# List
+# =============================================================================
+
+@router.get("/", response_model=list[{{ModelName}}Public])
+def list_{{model_name}}s(
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=100, description="Max records to return"),
+    is_active: bool | None = Query(None, description="Filter by active status"),
+    session: Session = Depends(get_session),
+):
+    """List all {{model_name}}s with pagination and filtering."""
+    return crud.get_{{model_name}}s(
+        session,
+        skip=skip,
+        limit=limit,
+        is_active=is_active,
+    )
+
+
+# =============================================================================
+# Get
+# =============================================================================
+
+@router.get("/{{{model_name}}_id}", response_model={{ModelName}}Public)
+def get_{{model_name}}(
+    {{model_name}}_id: int,
+    session: Session = Depends(get_session),
+):
+    """Get a single {{model_name}} by ID."""
+    db_obj = crud.get_{{model_name}}(session, {{model_name}}_id)
+    if not db_obj:
+        raise HTTPException(status_code=404, detail="{{ModelName}} not found")
+    return db_obj
+
+
+# =============================================================================
+# Create
+# =============================================================================
+
+@router.post("/", response_model={{ModelName}}Public, status_code=201)
+def create_{{model_name}}(
+    data: {{ModelName}}Create,
+    session: Session = Depends(get_session),
+):
+    """Create a new {{model_name}}."""
+    return crud.create_{{model_name}}(session, data)
+
+
+# =============================================================================
+# Update
+# =============================================================================
+
+@router.patch("/{{{model_name}}_id}", response_model={{ModelName}}Public)
+def update_{{model_name}}(
+    {{model_name}}_id: int,
+    data: {{ModelName}}Update,
+    session: Session = Depends(get_session),
+):
+    """Update an existing {{model_name}}."""
+    db_obj = crud.update_{{model_name}}(session, {{model_name}}_id, data)
+    if not db_obj:
+        raise HTTPException(status_code=404, detail="{{ModelName}} not found")
+    return db_obj
+
+
+@router.put("/{{{model_name}}_id}", response_model={{ModelName}}Public)
+def replace_{{model_name}}(
+    {{model_name}}_id: int,
+    data: {{ModelName}}Create,
+    session: Session = Depends(get_session),
+):
+    """Replace an existing {{model_name}} (full update)."""
+    # First check if exists
+    existing = crud.get_{{model_name}}(session, {{model_name}}_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="{{ModelName}} not found")
+
+    # Update with all fields
+    update_data = {{ModelName}}Update(**data.model_dump())
+    return crud.update_{{model_name}}(session, {{model_name}}_id, update_data)
+
+
+# =============================================================================
+# Delete
+# =============================================================================
+
+@router.delete("/{{{model_name}}_id}", status_code=204)
+def delete_{{model_name}}(
+    {{model_name}}_id: int,
+    session: Session = Depends(get_session),
+):
+    """Delete a {{model_name}}."""
+    if not crud.delete_{{model_name}}(session, {{model_name}}_id):
+        raise HTTPException(status_code=404, detail="{{ModelName}} not found")

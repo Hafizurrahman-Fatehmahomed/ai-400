@@ -1,0 +1,280 @@
+# SQLModel Test Fixtures Template
+# Production-ready pytest fixtures for testing SQLModel + FastAPI
+
+import pytest
+from collections.abc import Generator
+from sqlmodel import Session, SQLModel, create_engine
+from sqlalchemy.pool import StaticPool
+from fastapi.testclient import TestClient
+
+from app.main import app
+from app.database import get_session
+
+
+# =============================================================================
+# Engine & Session Fixtures
+# =============================================================================
+
+@pytest.fixture(name="engine", scope="session")
+def engine_fixture():
+    """
+    Create test database engine (once per test session).
+
+    Uses in-memory SQLite with StaticPool for thread safety.
+    """
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture(name="session")
+def session_fixture(engine) -> Generator[Session, None, None]:
+    """
+    Create database session with transaction rollback.
+
+    Each test runs in its own transaction that's rolled back after,
+    ensuring test isolation without affecting other tests.
+    """
+    connection = engine.connect()
+    transaction = connection.begin()
+    session = Session(bind=connection)
+
+    yield session
+
+    session.close()
+    transaction.rollback()
+    connection.close()
+
+
+@pytest.fixture(name="client")
+def client_fixture(session: Session) -> Generator[TestClient, None, None]:
+    """
+    Create FastAPI test client with session override.
+
+    Overrides the get_session dependency to use the test session.
+    """
+    def override_get_session():
+        return session
+
+    app.dependency_overrides[get_session] = override_get_session
+
+    with TestClient(app) as client:
+        yield client
+
+    app.dependency_overrides.clear()
+
+
+# =============================================================================
+# Data Fixtures
+# =============================================================================
+
+@pytest.fixture
+def sample_user(session: Session):
+    """Create a sample user for testing."""
+    from app.models.user import User
+    from app.core.security import hash_password
+
+    user = User(
+        email="test@example.com",
+        full_name="Test User",
+        hashed_password=hash_password("TestPassword123!"),
+        is_active=True,
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+@pytest.fixture
+def inactive_user(session: Session):
+    """Create an inactive user for testing."""
+    from app.models.user import User
+    from app.core.security import hash_password
+
+    user = User(
+        email="inactive@example.com",
+        full_name="Inactive User",
+        hashed_password=hash_password("TestPassword123!"),
+        is_active=False,
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+@pytest.fixture
+def admin_user(session: Session):
+    """Create an admin user for testing."""
+    from app.models.user import User
+    from app.core.security import hash_password
+
+    user = User(
+        email="admin@example.com",
+        full_name="Admin User",
+        hashed_password=hash_password("AdminPassword123!"),
+        is_active=True,
+        is_superuser=True,
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+# =============================================================================
+# Authentication Fixtures
+# =============================================================================
+
+@pytest.fixture
+def auth_headers(sample_user) -> dict[str, str]:
+    """Generate authentication headers for sample user."""
+    from app.core.security import create_access_token
+
+    token = create_access_token(sample_user.id)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def admin_auth_headers(admin_user) -> dict[str, str]:
+    """Generate authentication headers for admin user."""
+    from app.core.security import create_access_token
+
+    token = create_access_token(admin_user.id)
+    return {"Authorization": f"Bearer {token}"}
+
+
+# =============================================================================
+# Factory Fixtures (for creating multiple items)
+# =============================================================================
+
+@pytest.fixture
+def user_factory(session: Session):
+    """Factory for creating users with custom attributes."""
+    from app.models.user import User
+    from app.core.security import hash_password
+
+    created_users = []
+
+    def _create_user(
+        email: str = None,
+        full_name: str = "Test User",
+        password: str = "TestPassword123!",
+        is_active: bool = True,
+        is_superuser: bool = False,
+    ) -> User:
+        if email is None:
+            email = f"user_{len(created_users)}@example.com"
+
+        user = User(
+            email=email,
+            full_name=full_name,
+            hashed_password=hash_password(password),
+            is_active=is_active,
+            is_superuser=is_superuser,
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        created_users.append(user)
+        return user
+
+    return _create_user
+
+
+@pytest.fixture
+def task_factory(session: Session, sample_user):
+    """Factory for creating tasks."""
+    from app.models.task import Task, TaskStatus
+
+    created_tasks = []
+
+    def _create_task(
+        title: str = None,
+        description: str = None,
+        status: TaskStatus = TaskStatus.TODO,
+        user_id: int = None,
+    ) -> Task:
+        if title is None:
+            title = f"Task {len(created_tasks) + 1}"
+        if user_id is None:
+            user_id = sample_user.id
+
+        task = Task(
+            title=title,
+            description=description,
+            status=status,
+            user_id=user_id,
+        )
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+        created_tasks.append(task)
+        return task
+
+    return _create_task
+
+
+# =============================================================================
+# Async Fixtures (for async tests)
+# =============================================================================
+
+@pytest.fixture
+async def async_session():
+    """Create async session for async tests."""
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from sqlalchemy.pool import StaticPool
+
+    async_engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    async with async_engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+
+    async_session_factory = async_sessionmaker(
+        async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    async with async_session_factory() as session:
+        yield session
+
+    await async_engine.dispose()
+
+
+# =============================================================================
+# Usage Example
+# =============================================================================
+#
+# def test_create_user(client: TestClient):
+#     response = client.post(
+#         "/auth/register",
+#         json={
+#             "email": "new@example.com",
+#             "full_name": "New User",
+#             "password": "SecurePass123!",
+#         }
+#     )
+#     assert response.status_code == 201
+#     assert response.json()["email"] == "new@example.com"
+#
+#
+# def test_get_user_authenticated(client: TestClient, auth_headers):
+#     response = client.get("/auth/me", headers=auth_headers)
+#     assert response.status_code == 200
+#
+#
+# def test_multiple_users(client: TestClient, user_factory):
+#     user1 = user_factory(email="user1@example.com")
+#     user2 = user_factory(email="user2@example.com")
+#     assert user1.id != user2.id

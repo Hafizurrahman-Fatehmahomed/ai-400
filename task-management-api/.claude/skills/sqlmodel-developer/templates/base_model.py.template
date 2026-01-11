@@ -1,0 +1,60 @@
+# SQLModel Base Model Template
+# Replace {{ModelName}} with your model name (e.g., User, Product, Order)
+# Replace {{model_name}} with lowercase version (e.g., user, product, order)
+
+from datetime import datetime
+from sqlmodel import Field, SQLModel
+
+
+# =============================================================================
+# Database Model (Internal - includes all columns)
+# =============================================================================
+
+class {{ModelName}}(SQLModel, table=True):
+    """{{ModelName}} database model."""
+
+    # Primary key
+    id: int | None = Field(default=None, primary_key=True)
+
+    # Required fields
+    name: str = Field(max_length=100, index=True)
+
+    # Optional fields
+    description: str | None = Field(default=None, max_length=500)
+
+    # Status/flags
+    is_active: bool = Field(default=True)
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# =============================================================================
+# API Models (External - for request/response)
+# =============================================================================
+
+class {{ModelName}}Base(SQLModel):
+    """Shared fields for API models."""
+    name: str = Field(max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+
+
+class {{ModelName}}Create({{ModelName}}Base):
+    """Schema for creating a {{model_name}}."""
+    pass
+
+
+class {{ModelName}}Update(SQLModel):
+    """Schema for updating a {{model_name}}. All fields optional."""
+    name: str | None = None
+    description: str | None = None
+    is_active: bool | None = None
+
+
+class {{ModelName}}Public({{ModelName}}Base):
+    """Schema for returning a {{model_name}} to client."""
+    id: int
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime

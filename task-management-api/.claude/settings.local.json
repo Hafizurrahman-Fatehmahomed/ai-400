@@ -10,7 +10,15 @@
       "Bash(uv sync:*)",
       "Bash(uv run pytest:*)",
       "Bash(uv run python:*)",
-      "Bash(uv pip install:*)"
+      "Bash(uv pip install:*)",
+      "Bash(bash scripts/fetch-docs.sh:*)",
+      "WebFetch(domain:sqlmodel.tiangolo.com)",
+      "WebSearch",
+      "WebFetch(domain:docs.sqlalchemy.org)",
+      "WebFetch(domain:docs.pydantic.dev)",
+      "WebFetch(domain:www.thornewolf.com)",
+      "WebFetch(domain:blog.thornewolf.com)",
+      "WebFetch(domain:pytest-with-eric.com)"
     ]
   }
 }

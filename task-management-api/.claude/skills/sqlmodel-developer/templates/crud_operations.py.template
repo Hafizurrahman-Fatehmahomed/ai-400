@@ -1,0 +1,135 @@
+# SQLModel CRUD Operations Template
+# Replace {{ModelName}} with your model name (e.g., User, Product, Order)
+# Replace {{model_name}} with lowercase version (e.g., user, product, order)
+
+from datetime import datetime
+from sqlmodel import Session, select
+from sqlalchemy import func
+
+from app.models.{{model_name}} import (
+    {{ModelName}},
+    {{ModelName}}Create,
+    {{ModelName}}Update,
+)
+
+
+# =============================================================================
+# Create
+# =============================================================================
+
+def create_{{model_name}}(session: Session, data: {{ModelName}}Create) -> {{ModelName}}:
+    """Create a new {{model_name}}."""
+    db_obj = {{ModelName}}.model_validate(data)
+    session.add(db_obj)
+    session.commit()
+    session.refresh(db_obj)
+    return db_obj
+
+
+# =============================================================================
+# Read
+# =============================================================================
+
+def get_{{model_name}}(session: Session, {{model_name}}_id: int) -> {{ModelName}} | None:
+    """Get a {{model_name}} by ID."""
+    return session.get({{ModelName}}, {{model_name}}_id)
+
+
+def get_{{model_name}}_or_404(session: Session, {{model_name}}_id: int) -> {{ModelName}}:
+    """Get a {{model_name}} by ID or raise 404."""
+    from fastapi import HTTPException
+
+    db_obj = session.get({{ModelName}}, {{model_name}}_id)
+    if not db_obj:
+        raise HTTPException(status_code=404, detail="{{ModelName}} not found")
+    return db_obj
+
+
+def get_{{model_name}}s(
+    session: Session,
+    *,
+    skip: int = 0,
+    limit: int = 100,
+    is_active: bool | None = None,
+) -> list[{{ModelName}}]:
+    """Get list of {{model_name}}s with optional filtering."""
+    statement = select({{ModelName}})
+
+    if is_active is not None:
+        statement = statement.where({{ModelName}}.is_active == is_active)
+
+    statement = statement.offset(skip).limit(limit)
+    return session.exec(statement).all()
+
+
+def count_{{model_name}}s(
+    session: Session,
+    *,
+    is_active: bool | None = None,
+) -> int:
+    """Count {{model_name}}s with optional filtering."""
+    statement = select(func.count({{ModelName}}.id))
+
+    if is_active is not None:
+        statement = statement.where({{ModelName}}.is_active == is_active)
+
+    return session.exec(statement).one()
+
+
+# =============================================================================
+# Update
+# =============================================================================
+
+def update_{{model_name}}(
+    session: Session,
+    {{model_name}}_id: int,
+    data: {{ModelName}}Update,
+) -> {{ModelName}} | None:
+    """Update a {{model_name}} by ID."""
+    db_obj = session.get({{ModelName}}, {{model_name}}_id)
+    if not db_obj:
+        return None
+
+    update_data = data.model_dump(exclude_unset=True)
+    db_obj.sqlmodel_update(update_data)
+    db_obj.updated_at = datetime.utcnow()
+
+    session.add(db_obj)
+    session.commit()
+    session.refresh(db_obj)
+    return db_obj
+
+
+# =============================================================================
+# Delete
+# =============================================================================
+
+def delete_{{model_name}}(session: Session, {{model_name}}_id: int) -> bool:
+    """Delete a {{model_name}} by ID. Returns True if deleted."""
+    db_obj = session.get({{ModelName}}, {{model_name}}_id)
+    if not db_obj:
+        return False
+
+    session.delete(db_obj)
+    session.commit()
+    return True
+
+
+def soft_delete_{{model_name}}(
+    session: Session,
+    {{model_name}}_id: int,
+    deleted_by: int | None = None,
+) -> {{ModelName}} | None:
+    """Soft delete a {{model_name}} by setting deleted_at timestamp."""
+    db_obj = session.get({{ModelName}}, {{model_name}}_id)
+    if not db_obj:
+        return None
+
+    db_obj.deleted_at = datetime.utcnow()
+    if deleted_by:
+        db_obj.deleted_by = deleted_by
+
+    session.add(db_obj)
+    session.commit()
+    session.refresh(db_obj)
+    return db_obj

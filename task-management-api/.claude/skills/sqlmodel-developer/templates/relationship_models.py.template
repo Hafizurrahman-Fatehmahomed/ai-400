@@ -1,0 +1,157 @@
+# SQLModel Relationship Templates
+# Examples of one-to-many and many-to-many relationships
+
+from datetime import datetime
+from sqlmodel import Field, Relationship, SQLModel
+
+
+# =============================================================================
+# One-to-Many: Team has many Members
+# =============================================================================
+
+class Team(SQLModel, table=True):
+    """Parent model in one-to-many relationship."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(max_length=100, index=True)
+    description: str | None = Field(default=None, max_length=500)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Relationship: One team has many members
+    members: list["Member"] = Relationship(
+        back_populates="team",
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",  # Delete members when team deleted
+            "lazy": "selectin",  # Eager load by default
+        }
+    )
+
+
+class Member(SQLModel, table=True):
+    """Child model in one-to-many relationship."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(max_length=100)
+    email: str = Field(unique=True, max_length=255)
+
+    # Foreign key to parent
+    team_id: int | None = Field(
+        default=None,
+        foreign_key="team.id",
+        index=True,
+        ondelete="CASCADE",  # Database-level cascade
+    )
+
+    # Relationship back to parent
+    team: Team | None = Relationship(back_populates="members")
+
+
+# =============================================================================
+# Many-to-Many: Users can have multiple Roles, Roles can have multiple Users
+# =============================================================================
+
+class UserRoleLink(SQLModel, table=True):
+    """Link/junction/association table for many-to-many."""
+
+    __tablename__ = "user_role_link"
+
+    # Composite primary key
+    user_id: int = Field(foreign_key="user.id", primary_key=True)
+    role_id: int = Field(foreign_key="role.id", primary_key=True)
+
+    # Additional fields on the relationship (optional)
+    assigned_at: datetime = Field(default_factory=datetime.utcnow)
+    assigned_by: int | None = Field(default=None, foreign_key="user.id")
+
+
+class User(SQLModel, table=True):
+    """User model with many-to-many roles."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    email: str = Field(unique=True, max_length=255, index=True)
+    name: str = Field(max_length=100)
+
+    # Many-to-many relationship
+    roles: list["Role"] = Relationship(
+        back_populates="users",
+        link_model=UserRoleLink,
+    )
+
+
+class Role(SQLModel, table=True):
+    """Role model with many-to-many users."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, max_length=50, index=True)
+    description: str | None = Field(default=None, max_length=200)
+
+    # Many-to-many relationship
+    users: list["User"] = Relationship(
+        back_populates="roles",
+        link_model=UserRoleLink,
+    )
+
+
+# =============================================================================
+# Self-Referential: Categories with parent/children
+# =============================================================================
+
+class Category(SQLModel, table=True):
+    """Self-referential model for hierarchical data."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(max_length=100, index=True)
+
+    # Self-referential foreign key
+    parent_id: int | None = Field(
+        default=None,
+        foreign_key="category.id",
+        index=True,
+    )
+
+    # Parent relationship
+    parent: "Category | None" = Relationship(
+        back_populates="children",
+        sa_relationship_kwargs={
+            "remote_side": "Category.id",  # Required for self-referential
+        }
+    )
+
+    # Children relationship
+    children: list["Category"] = Relationship(back_populates="parent")
+
+
+# =============================================================================
+# One-to-One: User has one Profile
+# =============================================================================
+
+class UserProfile(SQLModel, table=True):
+    """User model with one-to-one profile."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    email: str = Field(unique=True, max_length=255)
+
+    # One-to-one relationship
+    profile: "Profile | None" = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={"uselist": False},  # Single object, not list
+    )
+
+
+class Profile(SQLModel, table=True):
+    """Profile model (one-to-one with User)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+
+    # Unique foreign key ensures one-to-one
+    user_id: int = Field(
+        foreign_key="userprofile.id",
+        unique=True,  # Enforces one-to-one
+        index=True,
+    )
+
+    bio: str | None = Field(default=None, max_length=1000)
+    avatar_url: str | None = Field(default=None, max_length=500)
+
+    # Relationship back to user
+    user: UserProfile = Relationship(back_populates="profile")
